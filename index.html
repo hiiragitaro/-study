@@ -84,7 +84,7 @@
   .feedback {
     position: fixed; left: 0; right: 0; bottom: 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
     background: #fff; box-shadow: 0 -4px 16px rgba(0,0,0,.12); border-radius: 24px 24px 0 0;
-    transform: translateY(130%); transition: transform .25s;
+    transform: translateY(calc(100% + 40px)); transition: transform .25s;
   }
   .feedback.show { transform: translateY(0); }
   .feedback .msg { font-size: 30px; font-weight: bold; text-align: center; margin-bottom: 6px; }
@@ -101,6 +101,15 @@
   .reward .get { font-size: 40px; font-weight: bold; color: #FF4B4B; margin: 4px 0; }
   .howto { font-size: 17px; line-height: 1.7; }
   .howto b { color: var(--main-dark); }
+
+  /* ▼ PoC-2で追加 */
+  .status { text-align: center; font-size: 24px; font-weight: bold; margin-top: 4px; }
+  .status.ok { color: #FF4B4B; }
+  .status.wait { color: var(--sub); font-size: 20px; }
+  .paper { text-align: center; color: var(--sub); font-size: 16px; margin: 0 0 16px; }
+  .feedback .msg.soft { color: var(--main-dark); font-size: 24px; }
+  .parent { font-size: 14px; color: var(--sub); line-height: 1.8; }
+  .parent b { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -108,18 +117,18 @@
 <!-- ===== ① ホーム画面 ===== -->
 <section id="home" class="screen active">
   <h1>きょうのチャレンジ</h1>
-  <p class="lead">10問中 8問せいかいで クリア！</p>
+  <p class="lead">20問チャレンジ！</p>
+  <p class="paper">✏️ えんぴつと 紙を よういしてね</p>
   <div class="card">
     <div class="meter-title">きょうの YouTube</div>
-    <div class="meter" id="homeMeter"></div>
-    <div class="meter-num" id="homeMinutes">0 / 60分</div>
+    <div class="status" id="homeStatus"></div>
   </div>
   <button class="big-btn" id="startBtn">はじめる</button>
 </section>
 
 <!-- ===== ② 問題画面 ===== -->
 <section id="quiz" class="screen">
-  <div class="progress"><span id="qNo">1問目 / 10問</span><span id="qScore">せいかい 0</span></div>
+  <div class="progress"><span id="qNo">1問目 / 20問</span><span id="qScore"></span></div>
   <div class="bar"><div id="qBar"></div></div>
   <div class="question" id="qText"></div>
   <div class="answers" id="qAnswers"></div>
@@ -127,13 +136,24 @@
   <div class="keypad" id="keypad"></div>
 </section>
 
-<!-- ===== ③ 結果画面 ===== -->
+<!-- ===== ③ 救済（おまけチャレンジ）の案内 ===== -->
+<section id="rescue" class="screen">
+  <div class="result-emoji">💪</div>
+  <h1>あと少し！</h1>
+  <div class="card howto" style="text-align:center">
+    おまけの <b>4問</b> で<br><b>3問</b> せいかいすれば クリアだよ！
+  </div>
+  <button class="big-btn" id="rescueBtn">おまけチャレンジ</button>
+</section>
+
+<!-- ===== ④ 結果画面 ===== -->
 <section id="result" class="screen">
   <div class="result-emoji" id="rEmoji"></div>
   <h1 id="rTitle"></h1>
   <div class="score" id="rScore"></div>
   <div class="card reward" id="rReward"></div>
   <div class="card howto" id="rHowto"></div>
+  <div class="card parent" id="rParent"></div>
   <button class="big-btn" id="backBtn">おわる</button>
 </section>
 
@@ -148,11 +168,15 @@
 /* =====================================================
    設定（ここの数字を変えると、ルールを変えられます）
    ===================================================== */
-const QUESTION_COUNT = 10;   // 1回の問題数
-const PASS_LINE = 8;         // 合格に必要な正解数
-const REWARD_MINUTES = 15;   // 1回合格でもらえる分数
-const MAX_REWARDS_PER_DAY = 4; // 1日にもらえる最大回数（4回 = 60分）
-const STORAGE_KEY = "study_poc1_daily"; // 端末に保存するときの名前
+const PASS_LINE = 16;          // 通常18問のうち、合格に必要な正解数
+const RESCUE_LINE = 15;        // この正解数のときだけ「おまけ（救済）」へ
+const RESCUE_COUNT = 4;        // 救済の問題数
+const RESCUE_PASS_LINE = 3;    // 救済で合格に必要な正解数
+const PROBE_COUNT = 2;         // チャレンジ問題（Probe）の数
+const MAX_REWARDS_PER_DAY = 1; // 1日にもらえるごほうびの回数
+const STORAGE_KEY = "study_poc1_daily";      // 本日の合格回数（PoC-1から同じ名前を継続）
+const HISTORY_KEY = "study_poc2_history";    // 解答の記録
+const HISTORY_LIMIT = 30;                     // 記録を残すチャレンジ数（古いものから消える）
 
 /* =====================================================
    本日の合格回数の保存（端末の中だけに保存）
@@ -172,64 +196,181 @@ function saveDaily(daily) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(daily)); } catch (e) {}
 }
 
+/* 解答の記録（将来の ProgressUnit・自動難易度・復習・Quick Guess対策用） */
+function loadHistory() {
+  try {
+    const list = JSON.parse(localStorage.getItem(HISTORY_KEY));
+    if (Array.isArray(list)) return list;
+  } catch (e) {}
+  return [];
+}
+function saveHistory(record) {
+  const list = loadHistory();
+  list.push(record);
+  while (list.length > HISTORY_LIMIT) list.shift();
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); } catch (e) {}
+}
+
 /* =====================================================
    問題をつくる
+   ・1つの「問題の種類（unit）」＝1つの関数
+   ・新しい種類や科目は、下の UNITS に1行足せば追加できる
    ===================================================== */
 function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function pick(list) { return list[rand(0, list.length - 1)]; }
-
-// たし算（3けたまで、答えは999以下）
-function makeAddition() {
-  const a = rand(100, 699), b = rand(10, 999 - a);
-  return { text: a + " + " + b + " =", answer: a + b };
-}
-// ひき算（3けた − 2〜3けた、答えは0より大きい）
-function makeSubtraction() {
-  const a = rand(200, 999), b = rand(10, a - 1);
-  return { text: a + " − " + b + " =", answer: a - b };
-}
-// かけ算（九九 または 2けた×1けた）
-function makeMultiplication() {
-  if (Math.random() < 0.5) {
-    const a = rand(2, 9), b = rand(2, 9);
-    return { text: a + " × " + b + " =", answer: a * b };
+function digit(n, place) { return Math.floor(n / place) % 10; } // place: 1=一の位, 10=十の位, 100=百の位
+function shuffle(list) {
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = rand(0, i);
+    [list[i], list[j]] = [list[j], list[i]];
   }
-  const a = rand(11, 39), b = rand(2, 5);
+  return list;
+}
+
+// 3けたのたし算（くり上がりあり。twoCarries=true なら2回くり上がる）
+function makeAdd3(opt) {
+  while (true) {
+    const a = rand(100, 899), b = rand(100, 899);
+    if (a + b > 999) continue;
+    const c1 = digit(a, 1) + digit(b, 1) >= 10;
+    const c2 = digit(a, 10) + digit(b, 10) + (c1 ? 1 : 0) >= 10;
+    if (opt && opt.twoCarries ? (c1 && c2) : (c1 || c2)) return { text: a + " + " + b + " =", answer: a + b };
+  }
+}
+// 3けたのひき算（くり下がりあり。zeroBorrow=true なら「503−178」のように0から借りる）
+function makeSub3(opt) {
+  while (true) {
+    if (opt && opt.zeroBorrow) {
+      const a = rand(2, 9) * 100 + rand(0, 8);       // 十の位が0
+      const b = rand(100, a - 1);
+      if (digit(b, 1) > digit(a, 1)) return { text: a + " − " + b + " =", answer: a - b };
+    } else {
+      const a = rand(300, 999), b = rand(100, a - 1);
+      const borrow = digit(b, 1) > digit(a, 1) || digit(b, 10) > digit(a, 10);
+      if (borrow) return { text: a + " − " + b + " =", answer: a - b };
+    }
+  }
+}
+// 九九
+function makeKuku() {
+  const a = rand(2, 9), b = rand(2, 9);
   return { text: a + " × " + b + " =", answer: a * b };
 }
-// わり算（九九の逆、または 80÷4・69÷3 のように各位がそのまま割れるもの）
-function makeDivision() {
-  if (Math.random() < 0.6) {
-    const b = rand(2, 9), q = rand(2, 9);
-    return { text: (b * q) + " ÷ " + b + " =", answer: b * q / b };
+// 2けた×1けた（くり上がりあり）
+function makeMul2x1() {
+  while (true) {
+    const a = rand(12, 98), b = rand(2, 9);
+    if (digit(a, 1) * b >= 10) return { text: a + " × " + b + " =", answer: a * b };
   }
-  const b = pick([2, 3, 4]);
-  const tensOptions = [], onesOptions = [];
-  for (let t = 1; t <= 9; t++) if (t % b === 0) tensOptions.push(t);
-  for (let o = 0; o <= 9; o++) if (o % b === 0) onesOptions.push(o);
-  const a = pick(tensOptions) * 10 + pick(onesOptions);
-  return { text: a + " ÷ " + b + " =", answer: a / b };
 }
-// あまりのあるわり算（商は9以下、あまりは1以上）
-function makeRemainder() {
-  const b = rand(2, 9), q = rand(1, 9), r = rand(1, b - 1);
-  return {
-    text: (b * q + r) + " ÷ " + b + " =",
-    answer: q, remainder: r, divisor: b, hasRemainder: true
-  };
+// 九九を使うわり算（わりきれる）
+function makeDivKuku() {
+  const b = rand(2, 9), q = rand(2, 9);
+  return { text: (b * q) + " ÷ " + b + " =", answer: q };
+}
+// あまりのあるわり算（0 < あまり < わる数、商は9以下）
+function makeDivRemainder() {
+  const b = rand(2, 9), q = rand(2, 9), r = rand(1, b - 1);
+  return { text: (b * q + r) + " ÷ " + b + " =", answer: q, remainder: r, divisor: b, hasRemainder: true };
 }
 
-// 10問のセット：たし算・ひき算3、かけ算3、わり算2、あまりのあるわり算2
-function makeChallenge() {
-  const list = [
-    pick([makeAddition, makeSubtraction])(),
-    makeAddition(),
-    makeSubtraction(),
-    makeMultiplication(), makeMultiplication(), makeMultiplication(),
-    makeDivision(), makeDivision(),
-    makeRemainder(), makeRemainder()
-  ];
-  return list.slice(0, QUESTION_COUNT);
+/* ---- Probe（チャレンジ問題）：少し先の内容。合否には使わない ---- */
+// 3けた×1けた
+function makeMul3x1() {
+  const a = rand(102, 399), b = rand(2, 4);
+  return { text: a + " × " + b + " =", answer: a * b };
+}
+// 4けたのたし算 または ひき算（くり上がり／くり下がり2回以上）
+function makeAddSub4() {
+  while (true) {
+    if (Math.random() < 0.5) {
+      const a = rand(1000, 8999), b = rand(100, 9999 - a);
+      let carry = 0, count = 0;
+      for (const p of [1, 10, 100, 1000]) {
+        carry = digit(a, p) + digit(b, p) + carry >= 10 ? 1 : 0;
+        count += carry;
+      }
+      if (count >= 2) return { text: a + " + " + b + " =", answer: a + b };
+    } else {
+      const a = rand(1000, 9999), b = rand(100, 999);
+      let borrow = 0, count = 0;
+      for (const p of [1, 10, 100, 1000]) {
+        borrow = digit(a, p) - borrow - digit(b, p) < 0 ? 1 : 0;
+        count += borrow;
+      }
+      if (count >= 2) return { text: a + " − " + b + " =", answer: a - b };
+    }
+  }
+}
+// 答えが2けたのわり算（69÷3 のように、各位がそのままわれるもの）
+function makeDiv2digit() {
+  const b = pick([2, 3, 4]);
+  const tens = [], ones = [];
+  for (let t = 1; t <= 9; t++) if (t % b === 0) tens.push(t);
+  for (let o = 0; o <= 9; o++) if (o % b === 0) ones.push(o);
+  const a = pick(tens) * 10 + pick(ones);
+  return { text: a + " ÷ " + b + " =", answer: a / b };
+}
+
+// 問題の種類の一覧（将来の ProgressUnit の入口）
+const UNITS = {
+  "math.add3":         { label: "3けたのたし算",        make: makeAdd3 },
+  "math.sub3":         { label: "3けたのひき算",        make: makeSub3 },
+  "math.kuku":         { label: "九九",                 make: makeKuku },
+  "math.mul2x1":       { label: "2けた×1けた",          make: makeMul2x1 },
+  "math.divKuku":      { label: "九九のわり算",          make: makeDivKuku },
+  "math.divRemainder": { label: "あまりのあるわり算",    make: makeDivRemainder },
+  // ↓ Probe用
+  "math.mul3x1":       { label: "3けた×1けた",          make: makeMul3x1 },
+  "math.addSub4":      { label: "4けたのたし算・ひき算", make: makeAddSub4 },
+  "math.div2digit":    { label: "答えが2けたのわり算",   make: makeDiv2digit }
+};
+const PROBE_UNITS = ["math.mul3x1", "math.addSub4", "math.div2digit"];
+
+// 通常18問の内訳（各3問）
+const NORMAL_PLAN = [
+  { unit: "math.add3", opt: { twoCarries: true } }, { unit: "math.add3" }, { unit: "math.add3" },
+  { unit: "math.sub3", opt: { zeroBorrow: true } }, { unit: "math.sub3" }, { unit: "math.sub3" },
+  { unit: "math.kuku" }, { unit: "math.kuku" }, { unit: "math.kuku" },
+  { unit: "math.mul2x1" }, { unit: "math.mul2x1" }, { unit: "math.mul2x1" },
+  { unit: "math.divKuku" }, { unit: "math.divKuku" }, { unit: "math.divKuku" },
+  { unit: "math.divRemainder" }, { unit: "math.divRemainder" }, { unit: "math.divRemainder" }
+];
+
+// 同じ問題が重ならないように作る
+function makeUnique(unit, kind, opt, usedTexts) {
+  for (let tries = 0; tries < 50; tries++) {
+    const q = UNITS[unit].make(opt);
+    if (!usedTexts.has(q.text)) {
+      usedTexts.add(q.text);
+      return Object.assign(q, { unit: unit, kind: kind }); // kind: normal / probe / rescue
+    }
+  }
+  const q = UNITS[unit].make(opt);
+  return Object.assign(q, { unit: unit, kind: kind });
+}
+
+// 20問のセット：通常18問をまぜて、5〜20問目のどこかにProbe2問を入れる
+function makeChallenge(usedTexts) {
+  const normal = shuffle(NORMAL_PLAN.map(p => makeUnique(p.unit, "normal", p.opt, usedTexts)));
+  const probes = shuffle(PROBE_UNITS.slice()).slice(0, PROBE_COUNT)
+                   .map(u => makeUnique(u, "probe", null, usedTexts));
+  const total = normal.length + probes.length;
+  const positions = shuffle(Array.from({ length: total - 4 }, (_, i) => i + 4)).slice(0, PROBE_COUNT);
+  const list = [];
+  for (let i = 0; i < total; i++) list.push(positions.includes(i) ? probes.shift() : normal.shift());
+  return list;
+}
+
+// 救済4問：通常問題で間違えた種類を優先（間違いが多い種類から順に）
+function makeRescue(normalAnswers, usedTexts) {
+  const wrongCount = {};
+  normalAnswers.filter(a => !a.correct).forEach(a => { wrongCount[a.unit] = (wrongCount[a.unit] || 0) + 1; });
+  let units = Object.keys(wrongCount).sort((x, y) => wrongCount[y] - wrongCount[x]);
+  if (units.length === 0) units = NORMAL_PLAN.map(p => p.unit);
+  const list = [];
+  for (let i = 0; i < RESCUE_COUNT; i++) list.push(makeUnique(units[i % units.length], "rescue", null, usedTexts));
+  return list;
 }
 
 /* =====================================================
@@ -240,33 +381,43 @@ function show(id) {
   document.getElementById(id).classList.add("active");
   window.scrollTo(0, 0);
 }
-function renderMeter(el, count) {
-  el.innerHTML = "";
-  for (let i = 0; i < MAX_REWARDS_PER_DAY; i++) {
-    const s = document.createElement("span");
-    if (i < count) s.className = "on";
-    el.appendChild(s);
-  }
-}
 function renderHome() {
   const daily = loadDaily();
-  renderMeter(document.getElementById("homeMeter"), daily.passCount);
-  document.getElementById("homeMinutes").textContent =
-    (daily.passCount * REWARD_MINUTES) + " / " + (MAX_REWARDS_PER_DAY * REWARD_MINUTES) + "分";
+  const el = document.getElementById("homeStatus");
+  if (daily.passCount >= MAX_REWARDS_PER_DAY) {
+    el.textContent = "1時間OK！ ✔";
+    el.className = "status ok";
+  } else {
+    el.textContent = "まだだよ";
+    el.className = "status wait";
+  }
   show("home");
 }
 
 /* =====================================================
    チャレンジ中の状態
    ===================================================== */
-let questions = [], index = 0, correctCount = 0;
+let questions = [], index = 0;
+let phase = "main";   // main = 20問 / rescue = 救済4問
+let challenge = null; // このチャレンジの記録
+let usedTexts = null; // 出した問題（重複防止）
+let shownAt = 0;      // 問題を表示した時刻
 let inputs = [];      // 入力中の数字（あまり問題は2つ）
 let focusIndex = 0;   // どちらの箱に入力しているか
 
 function startChallenge() {
-  questions = makeChallenge();
+  usedTexts = new Set();
+  questions = makeChallenge(usedTexts);
   index = 0;
-  correctCount = 0;
+  phase = "main";
+  challenge = { version: 1, date: todayString(), startedAt: Date.now(), answers: [] };
+  show("quiz");
+  showQuestion();
+}
+function startRescue() {
+  questions = makeRescue(challenge.answers.filter(a => a.kind === "normal"), usedTexts);
+  index = 0;
+  phase = "rescue";
   show("quiz");
   showQuestion();
 }
@@ -275,12 +426,15 @@ function showQuestion() {
   const q = questions[index];
   inputs = q.hasRemainder ? ["", ""] : [""];
   focusIndex = 0;
-  document.getElementById("qNo").textContent = (index + 1) + "問目 / " + questions.length + "問";
-  document.getElementById("qScore").textContent = "せいかい " + correctCount;
+  document.getElementById("qNo").textContent = phase === "main"
+    ? (index + 1) + "問目 / " + questions.length + "問"
+    : "おまけ " + (index + 1) + " / " + questions.length + "問";
+  document.getElementById("qScore").textContent = phase === "main" ? "" : "あと少し！";
   document.getElementById("qBar").style.width = (index / questions.length * 100) + "%";
   document.getElementById("qText").textContent = q.text;
   document.getElementById("qHint").textContent = q.hasRemainder ? "あまりの箱をタップすると、あまりを入れられるよ" : "";
   renderAnswers();
+  shownAt = Date.now();
 }
 
 // 答えの箱を表示
@@ -338,13 +492,35 @@ function submitAnswer() {
   const q = questions[index];
   let ok = Number(inputs[0]) === q.answer;
   if (q.hasRemainder) ok = ok && Number(inputs[1]) === q.remainder;
-  if (ok) correctCount++;
+  const correctText = q.answer + (q.hasRemainder ? " あまり " + q.remainder : "");
+
+  // 1問ごとの記録
+  challenge.answers.push({
+    unit: q.unit,                 // 問題の種類
+    kind: q.kind,                 // normal / probe / rescue
+    text: q.text,
+    correctAnswer: correctText,
+    userAnswer: inputs[0] + (q.hasRemainder ? " あまり " + inputs[1] : ""),
+    correct: ok,
+    timeMs: Date.now() - shownAt  // 回答にかかった時間（ミリ秒）
+  });
 
   const msg = document.getElementById("fbMsg");
-  msg.textContent = ok ? "せいかい！" : "ざんねん…";
-  msg.className = "msg " + (ok ? "ok" : "ng");
-  document.getElementById("fbCorrect").textContent = ok ? "" :
-    "こたえは " + q.answer + (q.hasRemainder ? " あまり " + q.remainder : "");
+  const sub = document.getElementById("fbCorrect");
+  if (ok) {
+    msg.textContent = q.kind === "probe" ? "すごい！ せいかい！" : "せいかい！";
+    msg.className = "msg ok";
+    sub.textContent = "";
+  } else if (q.kind === "probe") {
+    // チャレンジ問題はまちがえても気にしなくてよい表示に
+    msg.textContent = "ちょっと むずかしかったね";
+    msg.className = "msg soft";
+    sub.innerHTML = "こたえは " + correctText + "<br>チャレンジ問題だから だいじょうぶ！";
+  } else {
+    msg.textContent = "ざんねん…";
+    msg.className = "msg ng";
+    sub.textContent = "こたえは " + correctText;
+  }
   document.getElementById("nextBtn").textContent = (index + 1 < questions.length) ? "つぎへ" : "けっかを見る";
   document.getElementById("feedback").classList.add("show");
   setKeypadEnabled(false);
@@ -357,52 +533,76 @@ function nextQuestion() {
   document.getElementById("feedback").classList.remove("show");
   setKeypadEnabled(true);
   index++;
-  if (index < questions.length) showQuestion();
-  else showResult();
+  if (index < questions.length) { showQuestion(); return; }
+
+  if (phase === "main") {
+    const score = countCorrect("normal");
+    if (score >= PASS_LINE) finishChallenge(true);
+    else if (score === RESCUE_LINE) show("rescue");
+    else finishChallenge(false);
+  } else {
+    finishChallenge(countCorrect("rescue") >= RESCUE_PASS_LINE);
+  }
+}
+function countCorrect(kind) {
+  return challenge.answers.filter(a => a.kind === kind && a.correct).length;
 }
 
 /* =====================================================
    結果
    ===================================================== */
-function showResult() {
-  const passed = correctCount >= PASS_LINE;
+function finishChallenge(passed) {
   const daily = loadDaily();
-  const total = questions.length;
-  document.getElementById("rScore").textContent = total + "問中 " + correctCount + "問 せいかい";
+  const rewardGranted = passed && daily.passCount < MAX_REWARDS_PER_DAY;
+  if (rewardGranted) {
+    daily.passCount++;
+    saveDaily(daily);
+  }
+
+  const rewardScore = countCorrect("normal");
+  const probeScore = countCorrect("probe");
+  const rescueDone = phase === "rescue";
+  const rescueScore = rescueDone ? countCorrect("rescue") : null;
+  challenge.finishedAt = Date.now();
+  challenge.result = passed ? "pass" : "fail";
+  challenge.rewardScore = rewardScore;
+  challenge.probeScore = probeScore;
+  challenge.rescueScore = rescueScore;
+  challenge.rewardGranted = rewardGranted;
+  saveHistory(challenge);
 
   const reward = document.getElementById("rReward");
   const howto = document.getElementById("rHowto");
-  const maxMin = MAX_REWARDS_PER_DAY * REWARD_MINUTES;
+  document.getElementById("rScore").textContent = "";
 
-  if (passed && daily.passCount < MAX_REWARDS_PER_DAY) {
-    // 合格して、まだ今日のごほうびが残っている
-    daily.passCount++;
-    saveDaily(daily);
+  if (rewardGranted) {
     document.getElementById("rEmoji").textContent = "🎉";
     document.getElementById("rTitle").textContent = "クリア！";
-    reward.innerHTML =
-      '<div class="yt">YouTube</div><div class="get">+' + REWARD_MINUTES + '分 GET!</div>' +
-      '<div class="meter" id="rMeter" style="margin-top:12px"></div>' +
-      '<div class="meter-num">きょう ' + (daily.passCount * REWARD_MINUTES) + ' / ' + maxMin + '分（' +
-      daily.passCount + '/' + MAX_REWARDS_PER_DAY + '回）</div>';
-    renderMeter(document.getElementById("rMeter"), daily.passCount);
+    reward.innerHTML = '<div class="get">YouTube<br>1時間OK！</div>';
     howto.style.display = "";
-    howto.innerHTML = "つぎは<br>① <b>YouTube</b> をひらく<br>② <b>「時間延長の許可を求める」</b>をおす<br>③ おうちの人が <b>15分</b> OKしたら見られるよ！";
+    howto.innerHTML = "YouTubeを開いて<br><b>『時間延長の許可を求める』</b>を<br>押してね。<br>おうちの人がOKしたら 見られるよ！";
   } else if (passed) {
-    // 合格したが、今日のごほうびはもう上限
     document.getElementById("rEmoji").textContent = "🌟";
     document.getElementById("rTitle").textContent = "クリア！";
-    reward.innerHTML = '<div class="yt">きょうは もう YouTubeを ' + maxMin + '分 もらったよ。</div>' +
-      '<div class="get" style="font-size:24px">きょうのごほうびは ここまで！</div>';
+    reward.innerHTML = '<div class="get" style="font-size:24px">きょうのごほうびは<br>もうGETしているよ</div>' +
+      '<div class="yt">たくさん練習して えらい！</div>';
     howto.style.display = "none";
   } else {
-    // 不合格
     document.getElementById("rEmoji").textContent = "💪";
     document.getElementById("rTitle").textContent = "おしい！";
-    reward.innerHTML = '<div class="yt">あと ' + (PASS_LINE - correctCount) + '問 せいかいで クリアだったよ。</div>' +
-      '<div class="get" style="font-size:24px">もういちど チャレンジしよう！</div>';
+    reward.innerHTML = '<div class="get" style="font-size:24px">もういちど<br>チャレンジしよう！</div>';
     howto.style.display = "none";
   }
+
+  // おうちの人向けの確認情報
+  const sec = Math.round((challenge.finishedAt - challenge.startedAt) / 1000);
+  document.getElementById("rParent").innerHTML =
+    "おうちの人むけ<br>" +
+    "報酬判定：<b>" + rewardScore + " / 18</b><br>" +
+    "チャレンジ問題：<b>" + probeScore + " / " + PROBE_COUNT + "</b><br>" +
+    (rescueDone ? "救済：<b>" + rescueScore + " / " + RESCUE_COUNT + "</b><br>" : "") +
+    "かかった時間：<b>" + Math.floor(sec / 60) + "分" + (sec % 60) + "秒</b>";
+
   show("result");
 }
 
@@ -430,6 +630,7 @@ function addKey(pad, n) {
 }
 
 document.getElementById("startBtn").addEventListener("click", startChallenge);
+document.getElementById("rescueBtn").addEventListener("click", startRescue);
 document.getElementById("nextBtn").addEventListener("click", nextQuestion);
 document.getElementById("backBtn").addEventListener("click", renderHome);
 // アプリに戻ってきたとき、日付が変わっていればホームの表示を更新
