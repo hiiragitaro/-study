@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<!-- ▼ ホーム画面に追加したときの設定 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="べんきょう">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="theme-color" content="#FFF8EE">
+<title>べんきょう</title>
+<style>
+  :root {
+    --bg: #FFF8EE;
+    --card: #FFFFFF;
+    --ink: #2B2B2B;
+    --sub: #7A7065;
+    --main: #FF8A3D;
+    --main-dark: #E06A1B;
+    --ok: #2FA66A;
+    --ng: #E0534A;
+    --key: #F3EDE4;
+    --line: #E8DFD3;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
+    -webkit-user-select: none; user-select: none;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+  }
+  .screen { display: none; flex-direction: column; min-height: 100%; max-width: 480px; margin: 0 auto; padding: 20px 0; }
+  .screen.active { display: flex; }
+  h1 { font-size: 28px; text-align: center; margin: 24px 0 8px; }
+  .lead { text-align: center; color: var(--sub); margin: 0 0 24px; }
+  .card { background: var(--card); border-radius: 20px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.06); margin-bottom: 16px; }
+  .big-btn {
+    display: block; width: 100%; border: none; border-radius: 20px;
+    background: var(--main); color: #fff; font-size: 24px; font-weight: bold;
+    padding: 22px; margin-top: 8px; font-family: inherit;
+  }
+  .big-btn:active { background: var(--main-dark); }
+  .big-btn.gray { background: #B9AFA3; }
+
+  /* 今日のYouTubeメーター */
+  .meter-title { font-size: 16px; color: var(--sub); margin-bottom: 8px; }
+  .meter { display: flex; gap: 6px; }
+  .meter span { flex: 1; height: 22px; border-radius: 6px; background: var(--line); }
+  .meter span.on { background: #FF4B4B; }
+  .meter-num { text-align: right; font-size: 20px; font-weight: bold; margin-top: 8px; }
+
+  /* 問題画面 */
+  .progress { display: flex; justify-content: space-between; color: var(--sub); font-size: 15px; margin-bottom: 8px; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-bottom: 16px; }
+  .bar div { height: 100%; background: var(--main); width: 0; transition: width .3s; }
+  .question { font-size: 40px; font-weight: bold; text-align: center; margin: 16px 0 20px; letter-spacing: 1px; }
+  .answers { display: flex; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .answers label { font-size: 18px; color: var(--sub); }
+  .box {
+    min-width: 96px; height: 64px; border: 3px solid var(--line); border-radius: 14px;
+    font-size: 36px; font-weight: bold; display: flex; align-items: center; justify-content: center;
+    background: #fff; padding: 0 10px;
+  }
+  .box.focus { border-color: var(--main); }
+  .hint { text-align: center; color: var(--sub); font-size: 14px; min-height: 20px; margin-bottom: 8px; }
+
+  /* 数字キー（スマホのキーボードは使わない） */
+  .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: auto; }
+  .keypad button {
+    height: 62px; border: none; border-radius: 14px; background: var(--key);
+    font-size: 28px; font-weight: bold; color: var(--ink); font-family: inherit;
+  }
+  .keypad button:active { background: var(--line); }
+  .keypad button:disabled { opacity: .3; }
+  .keypad .del { font-size: 18px; }
+  .keypad .enter { background: var(--main); color: #fff; font-size: 20px; }
+  .keypad .enter:disabled { background: #D8CFC4; opacity: 1; }
+
+  /* 正解・不正解の表示 */
+  .feedback {
+    position: fixed; left: 0; right: 0; bottom: 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+    background: #fff; box-shadow: 0 -4px 16px rgba(0,0,0,.12); border-radius: 24px 24px 0 0;
+    transform: translateY(130%); transition: transform .25s;
+  }
+  .feedback.show { transform: translateY(0); }
+  .feedback .msg { font-size: 30px; font-weight: bold; text-align: center; margin-bottom: 6px; }
+  .feedback .msg.ok { color: var(--ok); }
+  .feedback .msg.ng { color: var(--ng); }
+  .feedback .correct { text-align: center; font-size: 20px; margin-bottom: 12px; min-height: 26px; }
+  .feedback .big-btn { max-width: 480px; margin: 0 auto; }
+
+  /* 結果画面 */
+  .result-emoji { font-size: 72px; text-align: center; margin-top: 16px; }
+  .score { font-size: 22px; text-align: center; margin: 8px 0 16px; }
+  .reward { text-align: center; }
+  .reward .yt { font-size: 18px; color: var(--sub); }
+  .reward .get { font-size: 40px; font-weight: bold; color: #FF4B4B; margin: 4px 0; }
+  .howto { font-size: 17px; line-height: 1.7; }
+  .howto b { color: var(--main-dark); }
+</style>
+</head>
+<body>
+
+<!-- ===== ① ホーム画面 ===== -->
+<section id="home" class="screen active">
+  <h1>きょうのチャレンジ</h1>
+  <p class="lead">10問中 8問せいかいで クリア！</p>
+  <div class="card">
+    <div class="meter-title">きょうの YouTube</div>
+    <div class="meter" id="homeMeter"></div>
+    <div class="meter-num" id="homeMinutes">0 / 60分</div>
+  </div>
+  <button class="big-btn" id="startBtn">はじめる</button>
+</section>
+
+<!-- ===== ② 問題画面 ===== -->
+<section id="quiz" class="screen">
+  <div class="progress"><span id="qNo">1問目 / 10問</span><span id="qScore">せいかい 0</span></div>
+  <div class="bar"><div id="qBar"></div></div>
+  <div class="question" id="qText"></div>
+  <div class="answers" id="qAnswers"></div>
+  <div class="hint" id="qHint"></div>
+  <div class="keypad" id="keypad"></div>
+</section>
+
+<!-- ===== ③ 結果画面 ===== -->
+<section id="result" class="screen">
+  <div class="result-emoji" id="rEmoji"></div>
+  <h1 id="rTitle"></h1>
+  <div class="score" id="rScore"></div>
+  <div class="card reward" id="rReward"></div>
+  <div class="card howto" id="rHowto"></div>
+  <button class="big-btn" id="backBtn">おわる</button>
+</section>
+
+<!-- 正解・不正解の表示 -->
+<div class="feedback" id="feedback">
+  <div class="msg" id="fbMsg"></div>
+  <div class="correct" id="fbCorrect"></div>
+  <button class="big-btn" id="nextBtn">つぎへ</button>
+</div>
+
+<script>
+/* =====================================================
+   設定（ここの数字を変えると、ルールを変えられます）
+   ===================================================== */
+const QUESTION_COUNT = 10;   // 1回の問題数
+const PASS_LINE = 8;         // 合格に必要な正解数
+const REWARD_MINUTES = 15;   // 1回合格でもらえる分数
+const MAX_REWARDS_PER_DAY = 4; // 1日にもらえる最大回数（4回 = 60分）
+const STORAGE_KEY = "study_poc1_daily"; // 端末に保存するときの名前
+
+/* =====================================================
+   本日の合格回数の保存（端末の中だけに保存）
+   ===================================================== */
+function todayString() {
+  const d = new Date();
+  return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate();
+}
+function loadDaily() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (saved && saved.date === todayString()) return saved;
+  } catch (e) { /* 保存データが読めないときは0回から */ }
+  return { date: todayString(), passCount: 0 }; // 日付が変わったら0回に戻る
+}
+function saveDaily(daily) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(daily)); } catch (e) {}
+}
+
+/* =====================================================
+   問題をつくる
+   ===================================================== */
+function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function pick(list) { return list[rand(0, list.length - 1)]; }
+
+// たし算（3けたまで、答えは999以下）
+function makeAddition() {
+  const a = rand(100, 699), b = rand(10, 999 - a);
+  return { text: a + " + " + b + " =", answer: a + b };
+}
+// ひき算（3けた − 2〜3けた、答えは0より大きい）
+function makeSubtraction() {
+  const a = rand(200, 999), b = rand(10, a - 1);
+  return { text: a + " − " + b + " =", answer: a - b };
+}
+// かけ算（九九 または 2けた×1けた）
+function makeMultiplication() {
+  if (Math.random() < 0.5) {
+    const a = rand(2, 9), b = rand(2, 9);
+    return { text: a + " × " + b + " =", answer: a * b };
+  }
+  const a = rand(11, 39), b = rand(2, 5);
+  return { text: a + " × " + b + " =", answer: a * b };
+}
+// わり算（九九の逆、または 80÷4・69÷3 のように各位がそのまま割れるもの）
+function makeDivision() {
+  if (Math.random() < 0.6) {
+    const b = rand(2, 9), q = rand(2, 9);
+    return { text: (b * q) + " ÷ " + b + " =", answer: b * q / b };
+  }
+  const b = pick([2, 3, 4]);
+  const tensOptions = [], onesOptions = [];
+  for (let t = 1; t <= 9; t++) if (t % b === 0) tensOptions.push(t);
+  for (let o = 0; o <= 9; o++) if (o % b === 0) onesOptions.push(o);
+  const a = pick(tensOptions) * 10 + pick(onesOptions);
+  return { text: a + " ÷ " + b + " =", answer: a / b };
+}
+// あまりのあるわり算（商は9以下、あまりは1以上）
+function makeRemainder() {
+  const b = rand(2, 9), q = rand(1, 9), r = rand(1, b - 1);
+  return {
+    text: (b * q + r) + " ÷ " + b + " =",
+    answer: q, remainder: r, divisor: b, hasRemainder: true
+  };
+}
+
+// 10問のセット：たし算・ひき算3、かけ算3、わり算2、あまりのあるわり算2
+function makeChallenge() {
+  const list = [
+    pick([makeAddition, makeSubtraction])(),
+    makeAddition(),
+    makeSubtraction(),
+    makeMultiplication(), makeMultiplication(), makeMultiplication(),
+    makeDivision(), makeDivision(),
+    makeRemainder(), makeRemainder()
+  ];
+  return list.slice(0, QUESTION_COUNT);
+}
+
+/* =====================================================
+   画面の切りかえ
+   ===================================================== */
+function show(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+  window.scrollTo(0, 0);
+}
+function renderMeter(el, count) {
+  el.innerHTML = "";
+  for (let i = 0; i < MAX_REWARDS_PER_DAY; i++) {
+    const s = document.createElement("span");
+    if (i < count) s.className = "on";
+    el.appendChild(s);
+  }
+}
+function renderHome() {
+  const daily = loadDaily();
+  renderMeter(document.getElementById("homeMeter"), daily.passCount);
+  document.getElementById("homeMinutes").textContent =
+    (daily.passCount * REWARD_MINUTES) + " / " + (MAX_REWARDS_PER_DAY * REWARD_MINUTES) + "分";
+  show("home");
+}
+
+/* =====================================================
+   チャレンジ中の状態
+   ===================================================== */
+let questions = [], index = 0, correctCount = 0;
+let inputs = [];      // 入力中の数字（あまり問題は2つ）
+let focusIndex = 0;   // どちらの箱に入力しているか
+
+function startChallenge() {
+  questions = makeChallenge();
+  index = 0;
+  correctCount = 0;
+  show("quiz");
+  showQuestion();
+}
+
+function showQuestion() {
+  const q = questions[index];
+  inputs = q.hasRemainder ? ["", ""] : [""];
+  focusIndex = 0;
+  document.getElementById("qNo").textContent = (index + 1) + "問目 / " + questions.length + "問";
+  document.getElementById("qScore").textContent = "せいかい " + correctCount;
+  document.getElementById("qBar").style.width = (index / questions.length * 100) + "%";
+  document.getElementById("qText").textContent = q.text;
+  document.getElementById("qHint").textContent = q.hasRemainder ? "あまりの箱をタップすると、あまりを入れられるよ" : "";
+  renderAnswers();
+}
+
+// 答えの箱を表示
+function renderAnswers() {
+  const q = questions[index];
+  const area = document.getElementById("qAnswers");
+  area.innerHTML = "";
+  const labels = q.hasRemainder ? ["", "あまり"] : [""];
+  inputs.forEach((value, i) => {
+    if (labels[i]) {
+      const lb = document.createElement("label");
+      lb.textContent = labels[i];
+      area.appendChild(lb);
+    }
+    const box = document.createElement("div");
+    box.className = "box" + (i === focusIndex ? " focus" : "");
+    box.textContent = value || " ";
+    box.addEventListener("click", () => { focusIndex = i; renderAnswers(); });
+    area.appendChild(box);
+  });
+  updateKeys();
+}
+
+// 入力の上限（あまりは「わる数−1」まで、それ以外は4けたまで）
+function maxValueFor(i) {
+  const q = questions[index];
+  if (q.hasRemainder && i === 1) return q.divisor - 1;
+  return 9999;
+}
+// その数字を押したら上限を超えるキーは押せなくする
+function updateKeys() {
+  const current = inputs[focusIndex];
+  document.querySelectorAll(".keypad .num").forEach(btn => {
+    const next = current === "0" ? btn.dataset.n : current + btn.dataset.n;
+    btn.disabled = Number(next) > maxValueFor(focusIndex);
+  });
+  document.getElementById("enterKey").disabled = inputs.some(v => v === "");
+}
+
+function pressNumber(n) {
+  let v = inputs[focusIndex];
+  v = (v === "0") ? n : v + n;
+  if (Number(v) > maxValueFor(focusIndex)) return;
+  inputs[focusIndex] = v;
+  renderAnswers();
+}
+function pressDelete() {
+  inputs[focusIndex] = inputs[focusIndex].slice(0, -1);
+  renderAnswers();
+}
+
+// こたえあわせ
+function submitAnswer() {
+  if (inputs.some(v => v === "")) return;
+  const q = questions[index];
+  let ok = Number(inputs[0]) === q.answer;
+  if (q.hasRemainder) ok = ok && Number(inputs[1]) === q.remainder;
+  if (ok) correctCount++;
+
+  const msg = document.getElementById("fbMsg");
+  msg.textContent = ok ? "せいかい！" : "ざんねん…";
+  msg.className = "msg " + (ok ? "ok" : "ng");
+  document.getElementById("fbCorrect").textContent = ok ? "" :
+    "こたえは " + q.answer + (q.hasRemainder ? " あまり " + q.remainder : "");
+  document.getElementById("nextBtn").textContent = (index + 1 < questions.length) ? "つぎへ" : "けっかを見る";
+  document.getElementById("feedback").classList.add("show");
+  setKeypadEnabled(false);
+}
+function setKeypadEnabled(on) {
+  document.querySelectorAll(".keypad button").forEach(b => b.style.pointerEvents = on ? "" : "none");
+}
+
+function nextQuestion() {
+  document.getElementById("feedback").classList.remove("show");
+  setKeypadEnabled(true);
+  index++;
+  if (index < questions.length) showQuestion();
+  else showResult();
+}
+
+/* =====================================================
+   結果
+   ===================================================== */
+function showResult() {
+  const passed = correctCount >= PASS_LINE;
+  const daily = loadDaily();
+  const total = questions.length;
+  document.getElementById("rScore").textContent = total + "問中 " + correctCount + "問 せいかい";
+
+  const reward = document.getElementById("rReward");
+  const howto = document.getElementById("rHowto");
+  const maxMin = MAX_REWARDS_PER_DAY * REWARD_MINUTES;
+
+  if (passed && daily.passCount < MAX_REWARDS_PER_DAY) {
+    // 合格して、まだ今日のごほうびが残っている
+    daily.passCount++;
+    saveDaily(daily);
+    document.getElementById("rEmoji").textContent = "🎉";
+    document.getElementById("rTitle").textContent = "クリア！";
+    reward.innerHTML =
+      '<div class="yt">YouTube</div><div class="get">+' + REWARD_MINUTES + '分 GET!</div>' +
+      '<div class="meter" id="rMeter" style="margin-top:12px"></div>' +
+      '<div class="meter-num">きょう ' + (daily.passCount * REWARD_MINUTES) + ' / ' + maxMin + '分（' +
+      daily.passCount + '/' + MAX_REWARDS_PER_DAY + '回）</div>';
+    renderMeter(document.getElementById("rMeter"), daily.passCount);
+    howto.style.display = "";
+    howto.innerHTML = "つぎは<br>① <b>YouTube</b> をひらく<br>② <b>「時間延長の許可を求める」</b>をおす<br>③ おうちの人が <b>15分</b> OKしたら見られるよ！";
+  } else if (passed) {
+    // 合格したが、今日のごほうびはもう上限
+    document.getElementById("rEmoji").textContent = "🌟";
+    document.getElementById("rTitle").textContent = "クリア！";
+    reward.innerHTML = '<div class="yt">きょうは もう YouTubeを ' + maxMin + '分 もらったよ。</div>' +
+      '<div class="get" style="font-size:24px">きょうのごほうびは ここまで！</div>';
+    howto.style.display = "none";
+  } else {
+    // 不合格
+    document.getElementById("rEmoji").textContent = "💪";
+    document.getElementById("rTitle").textContent = "おしい！";
+    reward.innerHTML = '<div class="yt">あと ' + (PASS_LINE - correctCount) + '問 せいかいで クリアだったよ。</div>' +
+      '<div class="get" style="font-size:24px">もういちど チャレンジしよう！</div>';
+    howto.style.display = "none";
+  }
+  show("result");
+}
+
+/* =====================================================
+   ボタンのしくみ
+   ===================================================== */
+function buildKeypad() {
+  const pad = document.getElementById("keypad");
+  ["1","2","3","4","5","6","7","8","9"].forEach(n => addKey(pad, n));
+  const del = document.createElement("button");
+  del.className = "del"; del.textContent = "けす";
+  del.addEventListener("click", pressDelete);
+  pad.appendChild(del);
+  addKey(pad, "0");
+  const enter = document.createElement("button");
+  enter.className = "enter"; enter.id = "enterKey"; enter.textContent = "こたえる";
+  enter.addEventListener("click", submitAnswer);
+  pad.appendChild(enter);
+}
+function addKey(pad, n) {
+  const b = document.createElement("button");
+  b.className = "num"; b.dataset.n = n; b.textContent = n;
+  b.addEventListener("click", () => pressNumber(n));
+  pad.appendChild(b);
+}
+
+document.getElementById("startBtn").addEventListener("click", startChallenge);
+document.getElementById("nextBtn").addEventListener("click", nextQuestion);
+document.getElementById("backBtn").addEventListener("click", renderHome);
+// アプリに戻ってきたとき、日付が変わっていればホームの表示を更新
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && document.getElementById("home").classList.contains("active")) renderHome();
+});
+
+buildKeypad();
+renderHome();
+</script>
+</body>
+</html>
